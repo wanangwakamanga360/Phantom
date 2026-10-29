@@ -5340,6 +5340,38 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(14, 16, 14, 16)
         lay.setSpacing(8)
 
+        nav_title = QLabel("NAVIGATION")
+        nav_title.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+        nav_title.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        lay.addWidget(nav_title)
+
+        def _nav(label: str, callback, active: bool = False):
+            b = QPushButton(label)
+            b.setFixedHeight(30)
+            b.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setStyleSheet(f"""
+                QPushButton {{
+                    text-align: left; padding-left: 12px;
+                    color: {C.WHITE if active else C.TEXT_MED};
+                    background: {C.PRI_GHO if active else 'transparent'};
+                    border: 1px solid {C.PRI_DIM if active else C.BORDER};
+                    border-radius: 7px;
+                }}
+                QPushButton:hover {{ color: {C.WHITE}; border-color: {C.PRI};
+                                     background: {C.PRI_GHO}; }}
+            """)
+            b.clicked.connect(callback)
+            lay.addWidget(b)
+            return b
+
+        _nav("⌂   HOME", lambda: (self._content_panel.hide(), self._quiz_panel.hide()), True)
+        _nav("▦   TOOLS", lambda: self._ctrl_btn.click())
+        _nav("□   FILES", lambda: self._drop_zone.setFocus())
+        _nav("◌   MEMORY", self._open_memory_panel)
+        _nav("⚙   SETTINGS", lambda: self._drawer_btn.click())
+        lay.addSpacing(8)
+
         hdr = QLabel("SYSTEM MONITOR")
         hdr.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
         hdr.setStyleSheet(f"color: {C.PRI}; background: transparent; "
@@ -5425,6 +5457,29 @@ class MainWindow(QMainWindow):
         sep.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
         lay.addWidget(sep)
 
+        lay.addWidget(_sec("CURRENT TASK"))
+        task_card = QWidget()
+        task_card.setStyleSheet(
+            f"background: {C.PANEL}; border: 1px solid {C.BORDER}; border-radius: 8px;"
+        )
+        task_lay = QVBoxLayout(task_card)
+        task_lay.setContentsMargins(12, 10, 12, 10)
+        task_lay.setSpacing(5)
+        self._task_state_lbl = QLabel("IDLE")
+        self._task_state_lbl.setFont(QFont("Segoe UI", 11, QFont.Weight.DemiBold))
+        self._task_state_lbl.setStyleSheet(f"color: {C.PRI}; background: transparent;")
+        task_lay.addWidget(self._task_state_lbl)
+        self._task_detail_lbl = QLabel("Awaiting your next command")
+        self._task_detail_lbl.setWordWrap(True)
+        self._task_detail_lbl.setFont(QFont("Segoe UI", 8))
+        self._task_detail_lbl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
+        task_lay.addWidget(self._task_detail_lbl)
+        lay.addWidget(task_card)
+
+        sep_task = QFrame(); sep_task.setFrameShape(QFrame.Shape.HLine)
+        sep_task.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
+        lay.addWidget(sep_task)
+
         lay.addWidget(_sec("FILE UPLOAD"))
         self._drop_zone = FileDropZone()
         self._drop_zone.file_selected.connect(self._on_file_selected)
@@ -5439,36 +5494,6 @@ class MainWindow(QMainWindow):
         sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.HLine)
         sep2.setStyleSheet(f"color: {C.BORDER}; margin: 2px 0;")
         lay.addWidget(sep2)
-
-        lay.addWidget(_sec("COMMAND INPUT"))
-        lay.addLayout(self._build_input_row())
-
-        self._interrupt_btn = QPushButton("✋  INTERRUPT  [ESC]")
-        self._interrupt_btn.setFixedHeight(34)
-        self._interrupt_btn.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
-        self._interrupt_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._interrupt_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: #170d15; color: {C.MUTED_C};
-                border: 1px solid {C.MUTED_C}; border-radius: 7px;
-            }}
-            QPushButton:hover {{
-                background: #200010; border: 1px solid #ff6688;
-            }}
-            QPushButton:pressed {{
-                background: #300018;
-            }}
-        """)
-        self._interrupt_btn.clicked.connect(self._do_interrupt)
-        lay.addWidget(self._interrupt_btn)
-
-        self._mute_btn = QPushButton("🎙  MICROPHONE ACTIVE")
-        self._mute_btn.setFixedHeight(34)
-        self._mute_btn.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
-        self._mute_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._mute_btn.clicked.connect(self._toggle_mute)
-        self._style_mute_btn()
-        lay.addWidget(self._mute_btn)
 
         return w
 
@@ -6211,18 +6236,40 @@ class MainWindow(QMainWindow):
 
     def _build_footer(self) -> QWidget:
         w = QWidget()
-        w.setFixedHeight(22)
+        w.setFixedHeight(82)
         w.setStyleSheet(f"background: {C.DARK}; border-top: 1px solid {C.BORDER};")
-        lay = QHBoxLayout(w); lay.setContentsMargins(14, 0, 14, 0)
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(24, 12, 24, 12)
+        lay.setSpacing(10)
 
-        def _fl(txt, color=C.TEXT_MED):
-            l = QLabel(txt); l.setFont(QFont("Courier New", 7))
-            l.setStyleSheet(f"color: {color}; background: transparent;")
-            return l
+        status = QLabel("◉  READY")
+        status.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+        status.setStyleSheet(f"color: {C.GREEN}; background: transparent;")
+        lay.addWidget(status)
+        lay.addSpacing(8)
+        lay.addLayout(self._build_input_row(), stretch=1)
 
-        lay.addWidget(_fl("[F4] Mute  ·  [F11] Fullscreen"))
-        lay.addStretch()
-        lay.addWidget(_fl("By FatihMakes", C.PRI_DIM))
+        self._mute_btn = QPushButton("🎙  MICROPHONE ACTIVE")
+        self._mute_btn.setFixedSize(174, 38)
+        self._mute_btn.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+        self._mute_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._mute_btn.clicked.connect(self._toggle_mute)
+        self._style_mute_btn()
+        lay.addWidget(self._mute_btn)
+
+        self._interrupt_btn = QPushButton("✋  STOP")
+        self._interrupt_btn.setFixedSize(92, 38)
+        self._interrupt_btn.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+        self._interrupt_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._interrupt_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: #170d15; color: {C.MUTED_C};
+                border: 1px solid {C.MUTED_C}; border-radius: 19px;
+            }}
+            QPushButton:hover {{ background: #2b1320; border-color: #ff6688; }}
+        """)
+        self._interrupt_btn.clicked.connect(self._do_interrupt)
+        lay.addWidget(self._interrupt_btn)
         return w
 
     def _on_file_selected(self, path: str):
@@ -6914,6 +6961,24 @@ class MainWindow(QMainWindow):
     def _apply_state(self, state: str):
         self.hud.state    = state
         self.hud.speaking = (state == "SPEAKING")
+        if hasattr(self, "_task_state_lbl"):
+            label = str(state or "IDLE").upper()
+            colour = C.RED if label in {"ERROR", "FAILED"} else (
+                C.GREEN if label in {"IDLE", "READY", "SLEEPING"} else C.PRI
+            )
+            self._task_state_lbl.setText(label)
+            self._task_state_lbl.setStyleSheet(
+                f"color: {colour}; background: transparent;"
+            )
+            detail = {
+                "IDLE": "Awaiting your next command",
+                "LISTENING": "Listening for your voice",
+                "THINKING": "Processing the current request",
+                "EXECUTING": "Running an action",
+                "SPEAKING": "Preparing a response",
+                "SLEEPING": "Wake word mode is resting",
+            }.get(label, "Assistant state updated")
+            self._task_detail_lbl.setText(detail)
 
     def _check_config(self) -> bool:
         if not API_FILE.exists(): return False
