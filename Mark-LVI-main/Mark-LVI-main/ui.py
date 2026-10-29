@@ -403,11 +403,24 @@ class _SysMetrics:
 _metrics = _SysMetrics()
 
 class HudCanvas(QWidget):
+    core_clicked = pyqtSignal()
+    core_node_activated = pyqtSignal(str)
+
     def __init__(self, face_path: str, assistant_name: str = "J.A.R.V.I.S", parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
         self.setMinimumSize(300, 300)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMouseTracking(True)
+        self._interaction_enabled = True
+        self._pointer_target = QPointF(0.0, 0.0)
+        self._pointer = QPointF(0.0, 0.0)
+        self._dragging = False
+        self._drag_last = QPointF()
+        self._orbit_yaw = 0.0
+        self._orbit_pitch = 0.0
+        self._hover_node = -1
+        self._node_positions: list[tuple[float, float, str]] = []
 
         self.muted    = False
         self.speaking = False
@@ -438,8 +451,8 @@ class HudCanvas(QWidget):
         self._tgt_scale  = 1.0
         self._halo       = 55.0
         self._tgt_halo   = 55.0
-        self._last_t     = time.time()
-        self._step_t     = time.time()
+        self._last_t     = time.monotonic()
+        self._step_t     = time.monotonic()
         self._blink      = True
         self._blink_tick = 0
 
@@ -467,6 +480,69 @@ class HudCanvas(QWidget):
         self._tmr = QTimer(self)
         self._tmr.timeout.connect(self._step)
         self._tmr.start(16)
+
+    def set_interaction_enabled(self, enabled: bool) -> None:
+        """Enable/disable pointer interaction without stopping animation."""
+        self._interaction_enabled = bool(enabled)
+        if not self._interaction_enabled:
+            self._pointer_target = QPointF(0.0, 0.0)
+            self._hover_node = -1
+
+    def mousePressEvent(self, event):
+        if not self._interaction_enabled:
+            return super().mousePressEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._dragging = True
+            self._drag_last = event.position()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not self._interaction_enabled:
+            return super().mouseMoveEvent(event)
+        pos = event.position()
+        if self._dragging:
+            delta = pos - self._drag_last
+            self._orbit_yaw = max(-0.42, min(0.42, self._orbit_yaw + delta.x() * 0.004))
+            self._orbit_pitch = max(-0.32, min(0.32, self._orbit_pitch + delta.y() * 0.003))
+            self._drag_last = pos
+        else:
+            self._pointer_target = QPointF(
+                max(-1.0, min(1.0, (pos.x() / max(1, self.width()) - 0.5) * 2.0)),
+                max(-1.0, min(1.0, (pos.y() / max(1, self.height()) - 0.5) * 2.0)),
+            )
+            self._hover_node = self._nearest_node(pos.x(), pos.y())
+        self.update()
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._dragging = False
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            idx = self._nearest_node(event.position().x(), event.position().y())
+            if idx >= 0 and idx < len(self._node_positions):
+                self.core_node_activated.emit(self._node_positions[idx][2])
+            else:
+                self.core_clicked.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _nearest_node(self, x: float, y: float) -> int:
+        best, best_d = -1, 18.0
+        for i, (nx, ny, _label) in enumerate(self._node_positions):
+            d = math.hypot(x - nx, y - ny)
+            if d < best_d:
+                best, best_d = i, d
+        return best
 
     def glance(self, dx: float, dy: float, hold: float = 1.1) -> None:
         """Ask the avatar to look somewhere for a moment (see HoloAvatar.glance)."""
@@ -560,7 +636,8 @@ class HudCanvas(QWidget):
 
     def _step(self):
         self._tick += 1
-        now = time.time()
+        now = time.time()             # viseme schedules use the audio wall clock
+        motion_now = time.monotonic() # animation must not jump if system time changes
 
         # ── Live audio reactivity ────────────────────────────────────────────
         # A viseme schedule, if one is playing, gives both the level and the
@@ -599,12 +676,27 @@ class HudCanvas(QWidget):
 
         # The avatar animates off the very same smoothed level the waveform
         # uses — one audio source, so the mouth can never drift out of sync.
-        dt = now - self._step_t
-        self._step_t = now
+        dt = motion_now - self._step_t
+        self._step_t = motion_now
         # Integrated, not derived from absolute time: multiplying wall-clock by
         # a rate that changes with state jumps the rings the instant JARVIS
         # starts talking. Same lesson the head's sway taught.
-        self._core_phase += min(0.10, max(0.0, dt))
+        dt = min(0.10, max(0.0, dt))
+        motion_rate = {
+            "IDLE": 0.55,
+            "LISTENING": 1.15,
+            "THINKING": 1.70,
+            "PROCESSING": 1.70,
+            "EXECUTING": 1.45,
+            "SPEAKING": 1.25,
+            "SUCCESS": 1.00,
+            "ERROR": 0.75,
+        }.get(str(self.state).upper(), 0.85)
+        self._core_phase += dt * motion_rate
+        self._pointer += (self._pointer_target - self._pointer) * min(1.0, dt * 8.0)
+        if not self._dragging:
+            self._orbit_yaw += (self._pointer.x() * 0.10 - self._orbit_yaw) * min(1.0, dt * 2.4)
+            self._orbit_pitch += (self._pointer.y() * 0.07 - self._orbit_pitch) * min(1.0, dt * 2.4)
 
         if self._avatar is not None and self.hud_style == "face":
             self._avatar.step(dt, amp, speaking=self.speaking,
@@ -614,7 +706,7 @@ class HudCanvas(QWidget):
                               v_hop=(sched[2] if sched is not None else 0.02))
         else:
             # Fallback core: slow "breathing" base target, lifted by the level.
-            if now - self._last_t > (0.12 if self.speaking else 0.5):
+            if motion_now - self._last_t > (0.12 if self.speaking else 0.5):
                 if self.speaking:
                     self._base_scale = 1.03
                     self._base_halo  = 122.0
@@ -624,7 +716,7 @@ class HudCanvas(QWidget):
                 else:
                     self._base_scale = random.uniform(1.001, 1.008)
                     self._base_halo  = random.uniform(48, 68)
-                self._last_t = now
+                self._last_t = motion_now
 
             if self.muted:
                 self._tgt_scale, self._tgt_halo = self._base_scale, self._base_halo
@@ -692,6 +784,10 @@ class HudCanvas(QWidget):
             return qcol(C.PRI), qcol(C.ACC2)
         if self.state == "LISTENING":
             return qcol(C.PRI), qcol(C.GREEN)
+        if self.state == "SUCCESS":
+            return qcol(C.PRI), qcol(C.GREEN)
+        if self.state in ("ERROR", "FAILED"):
+            return qcol(C.RED), qcol(C.RED)
         return qcol(C.PRI), qcol(C.PRI_DIM)
 
     def _paint_core(self, p: QPainter, cx: float, cy: float, r: float,
@@ -766,7 +862,73 @@ class HudCanvas(QWidget):
             p.setPen(QPen(blend(main, a), 1))
             p.drawEllipse(QRectF(cx - rad, cy - rad, rad * 2, rad * 2))
 
-        # 5. Long, sparse graduations: 24 majors reaching well in from the rim,
+        # 5b. Projected orbital planes. These are deliberately few and thin:
+        # each ellipse is a 3D plane projected into the HUD, with its own axis
+        # and phase. Pointer tilt changes the plane angles without rebuilding
+        # any geometry or allocating particles in the frame loop.
+        orbit_specs = (
+            (0.82, 0.28, 18.0, 1.0, "VOICE"),
+            (0.66, 0.52, -34.0, -0.72, "TOOLS"),
+            (0.49, 0.74, 61.0, 0.48, "MEMORY"),
+        )
+        self._node_positions = []
+        for idx, (rr, tilt, axis, speed, label) in enumerate(orbit_specs):
+            rad = r * rr
+            phase = t * speed * (1.0 + 0.45 * (1.0 if live else 0.0)) + idx * 2.15
+            plane_tilt = max(0.18, min(0.92, tilt + self._orbit_pitch * 0.35))
+            offset_x = self._pointer.x() * r * (0.025 + idx * 0.008)
+            offset_y = self._pointer.y() * r * (0.018 + idx * 0.006)
+            p.save()
+            p.translate(cx + offset_x, cy + offset_y)
+            p.rotate(axis + self._orbit_yaw * 34.0)
+            p.scale(1.0, plane_tilt)
+            p.setPen(QPen(blend(main if idx != 1 else acc, 0.42), 1.2))
+            p.drawEllipse(QRectF(-rad, -rad, rad * 2, rad * 2))
+            p.restore()
+
+            # One node per orbit, depth-brightened by its projected z value.
+            node_angle = phase + axis * 0.021
+            depth = 0.5 + 0.5 * math.sin(node_angle)
+            nx = cx + offset_x + math.cos(node_angle) * rad
+            ny = cy + offset_y + math.sin(node_angle) * rad * plane_tilt
+            self._node_positions.append((nx, ny, label))
+            node_r = 2.5 + depth * 2.2 + amp * 2.0
+            node_col = acc if idx == 1 else main
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(blend(node_col, 0.55 + depth * 0.4))
+            p.drawEllipse(QRectF(nx - node_r, ny - node_r, node_r * 2, node_r * 2))
+            if self._hover_node == idx:
+                p.setPen(QPen(blend(node_col, 0.9), 1.0))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawEllipse(QRectF(nx - node_r - 5, ny - node_r - 5,
+                                     (node_r + 5) * 2, (node_r + 5) * 2))
+                p.setFont(QFont("Segoe UI", max(8, int(r * 0.035)), QFont.Weight.DemiBold))
+                p.setPen(QPen(blend(qcol(C.WHITE), 0.9), 1))
+                p.drawText(QRectF(nx + 10, ny - 12, r * 0.30, 24),
+                           Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                           label)
+
+        # Compact geometric PHANTOM nucleus. The parallax offset is subtle, so
+        # the center remains readable while the surrounding planes move.
+        core_r = r * (0.17 + amp * 0.025)
+        p.save()
+        p.translate(cx + self._pointer.x() * r * 0.04,
+                    cy + self._pointer.y() * r * 0.03)
+        poly = QPainterPath()
+        for i in range(6):
+            a = math.radians(i * 60.0 - 30.0)
+            pt = QPointF(math.cos(a) * core_r, math.sin(a) * core_r)
+            poly.moveTo(pt) if i == 0 else poly.lineTo(pt)
+        poly.closeSubpath()
+        p.setBrush(blend(main, 0.18 + amp * 0.18))
+        p.setPen(QPen(blend(main, 0.82), 1.5))
+        p.drawPath(poly)
+        p.setPen(QPen(blend(acc, 0.7), 1.0))
+        p.drawEllipse(QRectF(-core_r * 0.35, -core_r * 0.35,
+                             core_r * 0.70, core_r * 0.70))
+        p.restore()
+
+        # 6. Long, sparse graduations: 24 majors reaching well in from the rim,
         #    with shorter minors between them.
         major, minor = [], []
         for i in range(72):
@@ -908,6 +1070,10 @@ class HudCanvas(QWidget):
         elif self.state == "LISTENING":
             sym = "●" if self._blink else "○"
             txt, col = f"{sym}  LISTENING",  qcol(C.GREEN)
+        elif self.state in ("ERROR", "FAILED"):
+            txt, col = "!  ERROR", qcol(C.RED)
+        elif self.state == "SUCCESS":
+            txt, col = "✓  SUCCESS", qcol(C.GREEN)
         else:
             sym = "●" if self._blink else "○"
             txt, col = f"{sym}  {self.state}", qcol(C.PRI)
@@ -4314,6 +4480,8 @@ class MainWindow(QMainWindow):
 
         # Center column: HUD + resizable content panel via QSplitter
         self.hud = HudCanvas(face_path, _display)
+        self.hud.core_clicked.connect(self._focus_command_bar)
+        self.hud.core_node_activated.connect(self._on_core_node_activated)
         self.hud.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._content_panel = self._build_content_panel()
         self._quiz_panel = self._build_quiz_panel()
@@ -4557,6 +4725,21 @@ class MainWindow(QMainWindow):
         sc_full.activated.connect(self._toggle_fullscreen)
         sc_intr = QShortcut(QKeySequence("Escape"), self)
         sc_intr.activated.connect(self._do_interrupt)
+
+    def _focus_command_bar(self):
+        """A core click is an interaction affordance, not a fake backend event."""
+        self._input.setFocus(Qt.FocusReason.MouseFocusReason)
+        self._input.selectAll()
+
+    def _on_core_node_activated(self, label: str):
+        """Route the three orbit nodes to real PHANTOM surfaces."""
+        label = str(label or "").upper()
+        if label == "TOOLS":
+            self._ctrl_btn.click()
+        elif label == "MEMORY":
+            self._open_memory_panel()
+        elif label == "VOICE":
+            self._focus_command_bar()
 
     def _show_camera_frame(self, img_bytes: bytes):
         """Slot — display camera preview overlay (main thread)."""
