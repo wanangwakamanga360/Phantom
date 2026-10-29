@@ -85,36 +85,36 @@ def _read_full_config() -> dict:
 APP_VERSION  = "MARK LVI"
 APP_PROTOCOL = APP_VERSION.split()[-1]
 
-_DEFAULT_W, _DEFAULT_H = 980, 700
-_MIN_W,     _MIN_H     = 820, 580
-_LEFT_W  = 148
-_RIGHT_W = 340
+_DEFAULT_W, _DEFAULT_H = 1280, 800
+_MIN_W,     _MIN_H     = 1040, 640
+_LEFT_W  = 206
+_RIGHT_W = 314
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
 
 class C:
-    BG        = "#00060a"
-    PANEL     = "#010d14"
-    PANEL2    = "#010f18"
-    BORDER    = "#0d3347"
-    BORDER_B  = "#1a5c7a"
-    BORDER_A  = "#0f4060"
-    PRI       = "#00d4ff"
-    PRI_DIM   = "#007a99"
-    PRI_GHO   = "#001f2e"
-    ACC       = "#ff6b00"
-    ACC2      = "#ffcc00"
-    GREEN     = "#00ff88"
+    BG        = "#02070d"
+    PANEL     = "#07131f"
+    PANEL2    = "#0b1b2a"
+    BORDER    = "#16354d"
+    BORDER_B  = "#275d7d"
+    BORDER_A  = "#1d4966"
+    PRI       = "#00dfff"
+    PRI_DIM   = "#168bb1"
+    PRI_GHO   = "#082d43"
+    ACC       = "#d8943d"
+    ACC2      = "#d9b36c"
+    GREEN     = "#46e0a1"
     GREEN_D   = "#00aa55"
     RED       = "#ff3355"
     MUTED_C   = "#ff3366"
-    TEXT      = "#8ffcff"
-    TEXT_DIM  = "#3a8a9a"
-    TEXT_MED  = "#5ab8cc"
-    WHITE     = "#d8f8ff"
-    DARK      = "#000d14"
-    BAR_BG    = "#011520"
+    TEXT      = "#b9e8f2"
+    TEXT_DIM  = "#648a9f"
+    TEXT_MED  = "#8ab7c7"
+    WHITE     = "#e4f8fb"
+    DARK      = "#030b13"
+    BAR_BG    = "#0a1a29"
 
 
 # Keys tied to the accent colour — status colours (ACC, GREEN, RED…) stay fixed
@@ -4479,10 +4479,10 @@ class MainWindow(QMainWindow):
         self._center_split.setStyleSheet(f"""
             QSplitter::handle {{
                 background: {C.BORDER};
-                height: 4px;
+                height: 2px;
             }}
             QSplitter::handle:hover {{
-                background: {C.PRI_DIM};
+                background: {C.PRI};
             }}
         """)
         self._center_split.addWidget(self._hud_cam_stack)
@@ -5227,10 +5227,11 @@ class MainWindow(QMainWindow):
 
     def _build_header(self) -> QWidget:
         w = QWidget()
-        w.setFixedHeight(54)
-        w.setStyleSheet(f"background: {C.DARK}; border-bottom: 1px solid {C.BORDER_B};")
+        w.setFixedHeight(66)
+        w.setStyleSheet(f"background: {C.DARK}; border-bottom: 1px solid {C.BORDER};")
         lay = QHBoxLayout(w)
-        lay.setContentsMargins(16, 0, 16, 0)
+        lay.setContentsMargins(22, 0, 22, 0)
+        lay.setSpacing(0)
 
         def _badge(txt, color=C.TEXT_MED):
             l = QLabel(txt)
@@ -5238,11 +5239,30 @@ class MainWindow(QMainWindow):
             l.setStyleSheet(f"color: {color}; background: transparent;")
             return l
 
-        lay.addWidget(_badge(APP_VERSION, C.PRI_DIM))
-        lay.addSpacing(8)
+        emblem = QLabel("◈")
+        emblem.setFont(QFont("Segoe UI Symbol", 24, QFont.Weight.Bold))
+        emblem.setStyleSheet(f"color: {C.PRI}; background: transparent;")
+        lay.addWidget(emblem)
+        lay.addSpacing(10)
+        wordmark = QLabel("P H A N T O M")
+        wordmark.setFont(QFont("Segoe UI", 12, QFont.Weight.DemiBold))
+        wordmark.setStyleSheet(f"color: {C.WHITE}; background: transparent; letter-spacing: 3px;")
+        lay.addWidget(wordmark)
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.VLine)
+        divider.setFixedHeight(25)
+        divider.setStyleSheet(f"color: {C.BORDER_B}; margin: 0 14px;")
+        lay.addWidget(divider)
+        status_dot = QLabel("●")
+        status_dot.setFont(QFont("Segoe UI", 8))
+        status_dot.setStyleSheet(f"color: {C.GREEN}; background: transparent;")
+        lay.addWidget(status_dot)
+        lay.addSpacing(6)
+        lay.addWidget(_badge("SYSTEM ONLINE", C.TEXT_MED))
+        lay.addSpacing(18)
         self._drawer_btn = QPushButton("⚙")
-        self._drawer_btn.setFixedSize(26, 26)
-        self._drawer_btn.setFont(QFont("Courier New", 11))
+        self._drawer_btn.setFixedSize(32, 30)
+        self._drawer_btn.setFont(QFont("Segoe UI Symbol", 12))
         self._drawer_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._drawer_btn.setToolTip("Settings & Controls")
         self._drawer_btn.setStyleSheet(f"""
@@ -5265,8 +5285,8 @@ class MainWindow(QMainWindow):
         # day. Separating them by that — setup behind ⚙, everyday behind 🎛 —
         # is what makes each list short enough to read at a glance.
         self._ctrl_btn = QPushButton("🎛")
-        self._ctrl_btn.setFixedSize(26, 26)
-        self._ctrl_btn.setFont(QFont("Courier New", 11))
+        self._ctrl_btn.setFixedSize(32, 30)
+        self._ctrl_btn.setFont(QFont("Segoe UI Symbol", 12))
         self._ctrl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._ctrl_btn.setToolTip("Controls — the everyday switches")
         self._ctrl_btn.setStyleSheet(self._drawer_btn.styleSheet())
@@ -5280,7 +5300,7 @@ class MainWindow(QMainWindow):
         _disp = self._assistant_name.upper()
         self._title_lbl = QLabel(_disp)
         self._title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._title_lbl.setFont(QFont("Courier New", 17, QFont.Weight.Bold))
+        self._title_lbl.setFont(QFont("Segoe UI", 16, QFont.Weight.DemiBold))
         self._title_lbl.setStyleSheet(f"color: {C.PRI}; background: transparent;")
         mid.addWidget(self._title_lbl)
         _sub_text = ("A Friendly Assistant"
@@ -5288,7 +5308,7 @@ class MainWindow(QMainWindow):
                      else "Personal AI Assistant")
         self._sub_lbl = QLabel(_sub_text)
         self._sub_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._sub_lbl.setFont(QFont("Courier New", 7))
+        self._sub_lbl.setFont(QFont("Segoe UI", 8))
         self._sub_lbl.setStyleSheet(f"color: {C.PRI_DIM}; background: transparent;")
         mid.addWidget(self._sub_lbl)
         lay.addLayout(mid)
@@ -5296,12 +5316,12 @@ class MainWindow(QMainWindow):
 
         right_col = QVBoxLayout(); right_col.setSpacing(2)
         self._clock_lbl = QLabel("00:00:00")
-        self._clock_lbl.setFont(QFont("Courier New", 14, QFont.Weight.Bold))
+        self._clock_lbl.setFont(QFont("Segoe UI", 13, QFont.Weight.DemiBold))
         self._clock_lbl.setStyleSheet(f"color: {C.PRI}; background: transparent;")
         self._clock_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
         right_col.addWidget(self._clock_lbl)
         self._date_lbl = QLabel("")
-        self._date_lbl.setFont(QFont("Courier New", 7))
+        self._date_lbl.setFont(QFont("Segoe UI", 7))
         self._date_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
         self._date_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
         right_col.addWidget(self._date_lbl)
@@ -5317,21 +5337,21 @@ class MainWindow(QMainWindow):
         w.setFixedWidth(_LEFT_W)
         w.setStyleSheet(f"background: {C.DARK}; border-right: 1px solid {C.BORDER};")
         lay = QVBoxLayout(w)
-        lay.setContentsMargins(8, 10, 8, 10)
-        lay.setSpacing(6)
+        lay.setContentsMargins(14, 16, 14, 16)
+        lay.setSpacing(8)
 
-        hdr = QLabel("◈ SYS MONITOR")
-        hdr.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        hdr = QLabel("SYSTEM MONITOR")
+        hdr.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
         hdr.setStyleSheet(f"color: {C.PRI}; background: transparent; "
-                          f"border-bottom: 1px solid {C.BORDER}; padding-bottom: 4px;")
+                          f"border-bottom: 1px solid {C.BORDER}; padding-bottom: 8px;")
         lay.addWidget(hdr)
         lay.addSpacing(2)
 
         self._bar_cpu = MetricBar("CPU", C.PRI)
-        self._bar_mem = MetricBar("MEM", C.ACC2)
-        self._bar_net = MetricBar("NET", C.GREEN)
-        self._bar_gpu = MetricBar("GPU", C.ACC)
-        self._bar_tmp = MetricBar("TMP", "#ff6688")
+        self._bar_mem = MetricBar("MEMORY", C.PRI)
+        self._bar_net = MetricBar("NETWORK", C.GREEN)
+        self._bar_gpu = MetricBar("GPU", C.ACC2)
+        self._bar_tmp = MetricBar("TEMP", "#c88492")
 
         for bar in [self._bar_cpu, self._bar_mem, self._bar_net,
                     self._bar_gpu, self._bar_tmp]:
@@ -5341,7 +5361,7 @@ class MainWindow(QMainWindow):
 
         info_panel = QWidget()
         info_panel.setStyleSheet(
-            f"background: {C.PANEL2}; border: 1px solid {C.BORDER}; border-radius: 4px;"
+            f"background: {C.PANEL}; border: 1px solid {C.BORDER}; border-radius: 8px;"
         )
         ip_lay = QVBoxLayout(info_panel)
         ip_lay.setContentsMargins(6, 5, 6, 5)
@@ -5369,16 +5389,16 @@ class MainWindow(QMainWindow):
         lay.addStretch()
 
         for txt, col in [
-            ("AI CORE\nACTIVE",  C.GREEN),
-            ("SEC\nCLEARED",     C.PRI),
-            ("PROTOCOL\n" + APP_PROTOCOL,   C.TEXT_DIM),
+            ("CORE\nREADY",  C.GREEN),
+            ("SECURITY\nCLEARED", C.PRI),
+            ("PROTOCOL\n" + APP_PROTOCOL, C.TEXT_DIM),
         ]:
             lbl = QLabel(txt)
             lbl.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet(
                 f"color: {col}; background: {C.PANEL2};"
-                f"border: 1px solid {C.BORDER_A}; border-radius: 3px; padding: 4px;"
+                f"border: 1px solid {C.BORDER_A}; border-radius: 6px; padding: 6px;"
             )
             lay.addWidget(lbl)
 
@@ -5388,13 +5408,13 @@ class MainWindow(QMainWindow):
         w.setFixedWidth(_RIGHT_W)
         w.setStyleSheet(f"background: {C.DARK}; border-left: 1px solid {C.BORDER};")
         lay = QVBoxLayout(w)
-        lay.setContentsMargins(8, 8, 8, 8)
-        lay.setSpacing(6)
+        lay.setContentsMargins(14, 16, 14, 16)
+        lay.setSpacing(9)
 
         def _sec(txt):
-            l = QLabel(f"▸ {txt}")
-            l.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
-            l.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
+            l = QLabel(txt)
+            l.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+            l.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; letter-spacing: 1px;")
             return l
 
         lay.addWidget(_sec("ACTIVITY LOG"))
@@ -5425,12 +5445,12 @@ class MainWindow(QMainWindow):
 
         self._interrupt_btn = QPushButton("✋  INTERRUPT  [ESC]")
         self._interrupt_btn.setFixedHeight(34)
-        self._interrupt_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._interrupt_btn.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
         self._interrupt_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._interrupt_btn.setStyleSheet(f"""
             QPushButton {{
-                background: #140008; color: {C.MUTED_C};
-                border: 1px solid {C.MUTED_C}; border-radius: 3px;
+                background: #170d15; color: {C.MUTED_C};
+                border: 1px solid {C.MUTED_C}; border-radius: 7px;
             }}
             QPushButton:hover {{
                 background: #200010; border: 1px solid #ff6688;
@@ -5443,8 +5463,8 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._interrupt_btn)
 
         self._mute_btn = QPushButton("🎙  MICROPHONE ACTIVE")
-        self._mute_btn.setFixedHeight(30)
-        self._mute_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._mute_btn.setFixedHeight(34)
+        self._mute_btn.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
         self._mute_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._mute_btn.clicked.connect(self._toggle_mute)
         self._style_mute_btn()
@@ -5678,7 +5698,7 @@ class MainWindow(QMainWindow):
         _W = 220
         drawer.setFixedWidth(_W)
         drawer.adjustSize()
-        drawer.setGeometry(left, 54, _W, drawer.sizeHint().height())
+        drawer.setGeometry(left, 66, _W, drawer.sizeHint().height())
 
     def _position_quick_drawer(self):
         if hasattr(self, "_quick_drawer"):
@@ -5699,26 +5719,26 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout(); row.setSpacing(5)
         self._input = QLineEdit()
         self._input.setPlaceholderText("Type a command or question…")
-        self._input.setFont(QFont("Courier New", 9))
-        self._input.setFixedHeight(30)
+        self._input.setFont(QFont("Segoe UI", 9))
+        self._input.setFixedHeight(38)
         self._input.setStyleSheet(f"""
             QLineEdit {{
-                background: #000d14; color: {C.WHITE};
-                border: 1px solid {C.BORDER}; border-radius: 3px; padding: 3px 7px;
+                background: {C.PANEL}; color: {C.WHITE};
+                border: 1px solid {C.BORDER_B}; border-radius: 19px; padding: 4px 14px;
             }}
-            QLineEdit:focus {{ border: 1px solid {C.PRI}; }}
+            QLineEdit:focus {{ border: 1px solid {C.PRI}; background: {C.PANEL2}; }}
         """)
         self._input.returnPressed.connect(self._send)
         row.addWidget(self._input)
 
         send = QPushButton("▸")
-        send.setFixedSize(30, 30)
-        send.setFont(QFont("Courier New", 11, QFont.Weight.Bold))
+        send.setFixedSize(38, 38)
+        send.setFont(QFont("Segoe UI", 13, QFont.Weight.DemiBold))
         send.setCursor(Qt.CursorShape.PointingHandCursor)
         send.setStyleSheet(f"""
             QPushButton {{
-                background: {C.PANEL}; color: {C.PRI};
-                border: 1px solid {C.PRI_DIM}; border-radius: 3px;
+                background: {C.PANEL2}; color: {C.PRI};
+                border: 1px solid {C.PRI_DIM}; border-radius: 19px;
             }}
             QPushButton:hover {{ background: {C.PRI_GHO}; border: 1px solid {C.PRI}; }}
         """)
