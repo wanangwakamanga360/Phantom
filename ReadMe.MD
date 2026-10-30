@@ -47,4 +47,6 @@ python3 -m py_compile \
 git diff --check
 ```
 
-The kinetic core does not require PyOpenGL or another new dependency. If a future hardware-accelerated surface is added, it should remain optional; the current QPainter renderer is the safe reduced-effects path for systems where GPU initialization is unavailable.
+The final core surface uses `Mark-LVI-main/Mark-LVI-main/assets/phantom_kinetic_core.png` for the reference-matched glass/metal finish, with live state, audio, parallax, hover, and orbit-node overlays drawn by `HudCanvas`. If that asset is unavailable, the procedural QPainter kinetic core remains the safe reduced-effects fallback. No new Python dependency or GPU runtime is required.
+
+The visual specification and audit trail are stored in `design-refs/phantom-kinetic-core-desktop-default.png` and `design-refs/phantom-kinetic-core-breakdown.md`.

@@ -444,6 +444,9 @@ class HudCanvas(QWidget):
             self.hud_style = get_hud_style()
         except Exception:
             self.hud_style = "face"
+        self._core_reference = QPixmap(
+            str(Path(__file__).resolve().parent / "assets" / "phantom_kinetic_core.png")
+        )
         self._core_phase = 0.0
 
         self._tick       = 0
@@ -811,25 +814,28 @@ class HudCanvas(QWidget):
 
         p.setBrush(Qt.BrushStyle.NoBrush)
 
-        # 1. The atmosphere. One radial gradient doing what a stack of discs did
-        #    badly: a wide, soft body of light that gives the thing presence
-        #    before any detail is read. This single element decides whether the
-        #    HUD looks vast or looks small, so it is drawn first and drawn big.
-        # Concentrated rather than spread: a gradient reaching the outer rim
-        # washes the whole disc a flat dim blue and reads as fog. Ending it at
-        # two thirds leaves it a body of light with somewhere to fall off to,
-        # which is what makes it look lit rather than tinted.
-        lift = 1.0 + 0.55 * amp + (0.18 if self.speaking else 0.0)
+        # 1. A restrained atmosphere. The reference is built from dark glass
+        # and edge light, not a filled cyan disc. Keep the glow inside the
+        # mechanism so the geometry remains the first thing the eye reads.
         p.setPen(Qt.PenStyle.NoPen)
-        for gr, a0, a1 in ((r * 0.70, 0.30, 0.0), (r * 0.34, 0.34, 0.0)):
-            g = QRadialGradient(cx, cy, gr)
-            g.setColorAt(0.00, blend(main, min(0.95, a0 * lift)))
-            g.setColorAt(0.45, blend(main, min(0.95, a0 * lift * 0.52)))
-            g.setColorAt(0.78, blend(main, min(0.95, a0 * lift * 0.18)))
-            g.setColorAt(1.00, blend(main, a1))
-            p.setBrush(QBrush(g))
-            p.drawEllipse(QRectF(cx - gr, cy - gr, gr * 2, gr * 2))
         p.setBrush(Qt.BrushStyle.NoBrush)
+
+        # A compact contact platform gives the floating assembly a believable
+        # anchor without turning the HUD into a decorative poster.
+        base_y = cy + r * 0.98
+        base_w = r * 0.46
+        base_h = r * 0.095
+        p.setPen(QPen(QColor(20, 38, 52), 2.0))
+        p.setBrush(QColor(5, 13, 22))
+        p.drawEllipse(QRectF(cx - base_w, base_y - base_h * 0.5,
+                             base_w * 2, base_h))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(blend(main, 0.82), 1.5))
+        p.drawArc(QRectF(cx - base_w * 0.82, base_y - base_h * 0.30,
+                         base_w * 1.64, base_h * 0.60), 0, 180 * 16)
+        p.setPen(QPen(blend(acc, 0.68), 1.0))
+        p.drawEllipse(QRectF(cx - base_w * 0.44, base_y - base_h * 0.18,
+                             base_w * 0.88, base_h * 0.36))
 
         # 2. Frame marks at the corners of the whole canvas, not of the circle.
         #    They are what set the scale: the eye reads the reactor as filling
@@ -843,16 +849,10 @@ class HudCanvas(QWidget):
                 p.drawLine(QLineF(x, y, x - sx * arm, y))
                 p.drawLine(QLineF(x, y, x, y - sy * arm))
 
-        # 3. Crosshair across the full canvas, broken around the core so it
-        #    frames the reactor rather than crossing it.
-        p.setPen(QPen(blend(main, 0.16), 1))
-        gap = r * 0.62
-        if W > 40:
-            p.drawLine(QLineF(cx - W / 2, cy, cx - gap, cy))
-            p.drawLine(QLineF(cx + gap, cy, cx + W / 2, cy))
-        if H > 40:
-            p.drawLine(QLineF(cx, cy - H / 2, cx, cy - gap))
-            p.drawLine(QLineF(cx, cy + gap, cx, cy + H / 2))
+        # 3. One quiet energy axis. The reference has a vertical power beam,
+        # not a full-screen crosshair or a military HUD grid.
+        p.setPen(QPen(blend(main, 0.12), 1))
+        p.drawLine(QLineF(cx, cy + r * 0.62, cx, cy + r * 1.02))
 
         # 4. Two thin outer circles. Sparse on purpose — a dense ring reads as a
         #    grey band at this size, and restraint is what made the original
@@ -882,8 +882,13 @@ class HudCanvas(QWidget):
             p.translate(cx + offset_x, cy + offset_y)
             p.rotate(axis + self._orbit_yaw * 34.0)
             p.scale(1.0, plane_tilt)
-            p.setPen(QPen(blend(main if idx != 1 else acc, 0.42), 1.2))
-            p.drawEllipse(QRectF(-rad, -rad, rad * 2, rad * 2))
+            orbit_col = main if idx != 1 else acc
+            p.setPen(QPen(blend(orbit_col, 0.34), 1.0))
+            orbit_box = QRectF(-rad, -rad, rad * 2, rad * 2)
+            p.drawArc(orbit_box, int((phase * 57.3) * 16), int(76 * 16))
+            p.drawArc(orbit_box, int((phase * 57.3 + 154) * 16), int(48 * 16))
+            p.setPen(QPen(blend(orbit_col, 0.72), 1.8))
+            p.drawArc(orbit_box, int((phase * 57.3 + 42) * 16), int(18 * 16))
             p.restore()
 
             # One node per orbit, depth-brightened by its projected z value.
@@ -908,22 +913,94 @@ class HudCanvas(QWidget):
                            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                            label)
 
+        # 5c. Dark mechanical bands beneath the orbital paths. Wide charcoal
+        # bodies establish depth; only their inner edges carry the cyan light.
+        # This is the visual distinction between a premium assembly and a flat
+        # collection of neon circles.
+        band_specs = (
+            (0.39, 0.64, 28.0, 74, 42),
+            (0.48, 0.52, -18.0, 168, 55),
+            (0.58, 0.40, 42.0, 254, 48),
+            (0.69, 0.30, -31.0, 70, 58),
+            (0.79, 0.24, 15.0, 214, 48),
+        )
+        for idx, (rr, tilt, axis, start, span) in enumerate(band_specs):
+            rad = r * rr
+            p.save()
+            p.translate(cx, cy)
+            p.rotate(axis + self._orbit_yaw * (20.0 + idx * 4.0))
+            p.scale(1.0, max(0.16, tilt + self._orbit_pitch * 0.22))
+            box = QRectF(-rad, -rad, rad * 2, rad * 2)
+            p.setPen(QPen(QColor(25, 49, 69), 12.0))
+            p.drawArc(box, int((start + t * (4.0 + idx)) * 16), int(span * 16))
+            edge = QColor(0, 196, 255) if idx in (1, 3) else QColor(55, 154, 216)
+            p.setPen(QPen(edge, 3.2))
+            p.drawArc(box, int((start + t * (4.0 + idx)) * 16), int(span * 16))
+            p.restore()
+
+        # High-value specular segments give the assembly the polished reference
+        # look. They are sparse highlights, not a continuous neon outline.
+        highlight_specs = (
+            (0.43, 0.44, -12.0, 208, 42),
+            (0.54, 0.34, 24.0, 18, 46),
+            (0.65, 0.26, -28.0, 124, 42),
+            (0.75, 0.19, 18.0, 286, 38),
+            (0.84, 0.14, -18.0, 52, 32),
+        )
+        for idx, (rr, tilt, axis, start, span) in enumerate(highlight_specs):
+            rad = r * rr
+            p.save()
+            p.translate(cx, cy)
+            p.rotate(axis + self._orbit_yaw * 18.0)
+            p.scale(1.0, max(0.12, tilt + self._orbit_pitch * 0.16))
+            box = QRectF(-rad, -rad, rad * 2, rad * 2)
+            p.setPen(QPen(QColor(7, 28, 45), 8.0))
+            p.drawArc(box, int((start - t * (3.0 + idx)) * 16), int(span * 16))
+            p.setPen(QPen(QColor(0, 190, 255), 2.8))
+            p.drawArc(box, int((start - t * (3.0 + idx)) * 16), int(span * 16))
+            p.setPen(QPen(QColor(210, 244, 255), 0.8))
+            p.drawArc(box, int((start - t * (3.0 + idx) + 3) * 16), int(8 * 16))
+            p.restore()
+
+        # Tight inner armor rings make the center feel engineered rather than
+        # like a lone circle floating inside a radar reticle.
+        for idx, (rr, start, span, tilt) in enumerate((
+                (0.28, 18, 84, 0.86),
+                (0.33, 152, 62, 0.72),
+                (0.38, 270, 96, 0.58))):
+            rad = r * rr
+            p.save()
+            p.translate(cx, cy)
+            p.rotate((idx - 1) * 22.0 + self._orbit_yaw * 20.0)
+            p.scale(1.0, tilt + self._orbit_pitch * 0.12)
+            box = QRectF(-rad, -rad, rad * 2, rad * 2)
+            p.setPen(QPen(QColor(18, 39, 57), 8.0))
+            p.drawArc(box, int((start + t * (5 + idx)) * 16), int(span * 16))
+            p.setPen(QPen(QColor(0, 165, 235), 2.2))
+            p.drawArc(box, int((start + t * (5 + idx)) * 16), int(span * 16))
+            p.restore()
+
         # Compact geometric PHANTOM nucleus. The parallax offset is subtle, so
         # the center remains readable while the surrounding planes move.
-        core_r = r * (0.17 + amp * 0.025)
+        core_r = r * (0.22 + amp * 0.025)
         p.save()
         p.translate(cx + self._pointer.x() * r * 0.04,
                     cy + self._pointer.y() * r * 0.03)
+        p.setPen(Qt.PenStyle.NoPen)
+        nucleus = QPainterPath()
+        nucleus.addEllipse(QRectF(-core_r * 1.10, -core_r * 1.10,
+                                  core_r * 2.20, core_r * 2.20))
+        p.fillPath(nucleus, QBrush(QColor(5, 17, 28, 255)))
         poly = QPainterPath()
         for i in range(6):
             a = math.radians(i * 60.0 - 30.0)
             pt = QPointF(math.cos(a) * core_r, math.sin(a) * core_r)
             poly.moveTo(pt) if i == 0 else poly.lineTo(pt)
         poly.closeSubpath()
-        p.setBrush(blend(main, 0.18 + amp * 0.18))
-        p.setPen(QPen(blend(main, 0.82), 1.5))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(blend(main, 0.82), 1.6))
         p.drawPath(poly)
-        p.setPen(QPen(blend(acc, 0.7), 1.0))
+        p.setPen(QPen(blend(acc, 0.88), 1.2))
         p.drawEllipse(QRectF(-core_r * 0.35, -core_r * 0.35,
                              core_r * 0.70, core_r * 0.70))
         p.restore()
@@ -980,16 +1057,28 @@ class HudCanvas(QWidget):
         p.setPen(QPen(blend(acc if live else main, 0.25 + 0.5 * amp), 1.6))
         p.drawLines(spikes)
 
-        # 8. The inner ring the name sits in.
+        # 8. Final dark nucleus layer. Keeping this late in the paint order
+        # guarantees that no orbit brush can turn the badge into a cyan disc.
+        ncx = cx + self._pointer.x() * r * 0.04
+        ncy = cy + self._pointer.y() * r * 0.03
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(5, 17, 28, 255))
+        p.drawEllipse(QRectF(ncx - core_r * 1.10, ncy - core_r * 1.10,
+                             core_r * 2.20, core_r * 2.20))
+
+        # 9. The inner ring the name sits in.
         inner = r * 0.355
         p.setPen(QPen(blend(acc, 0.30 + 0.45 * amp), 1.5))
-        p.drawEllipse(QRectF(cx - inner, cy - inner, inner * 2, inner * 2))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(QRectF(ncx - inner, ncy - inner, inner * 2, inner * 2))
 
-        # 9. The name, sized from the string rather than from the radius alone:
+        # 10. The name, sized from the string rather than from the radius alone:
         #    "J.A.R.V.I.S" and a name someone renamed to "MAX" are very
         #    different widths, and a fixed fraction of r spills one of them past
         #    the ring it is supposed to sit inside.
         name = self._assistant_name or ""
+        if name.replace(".", "").replace(" ", "").upper() == "JARVIS":
+            name = "JARVIS"
         if name:
             space = max(1.0, r * 0.018)
             fsz = max(8, int(min(r * 0.105,
@@ -997,9 +1086,66 @@ class HudCanvas(QWidget):
             f = QFont("Courier New", fsz, QFont.Weight.Bold)
             f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, space)
             p.setFont(f)
-            p.setPen(QPen(blend(qcol(C.WHITE), 0.6 + 0.4 * min(1.0, amp * 2)), 1))
-            p.drawText(QRectF(cx - r, cy - fsz, r * 2, fsz * 2),
+            label_col = QColor(226, 244, 255, 238)
+            p.setPen(QPen(label_col, 1))
+            p.drawText(QRectF(ncx - r, ncy - fsz, r * 2, fsz * 2),
                        Qt.AlignmentFlag.AlignCenter, name)
+
+    def _paint_reference_core(self, p: QPainter, cx: float, cy: float, r: float,
+                              W: float, H: float) -> None:
+        """Paint the reference-matched core asset with live interactive overlays.
+
+        The asset supplies the photorealistic glass/metal finish that the
+        lightweight QPainter fallback cannot synthesize. Motion, state color,
+        audio response, parallax, hover labels, and node routing remain live
+        and are drawn on top of it.
+        """
+        if self._core_reference.isNull():
+            self._paint_core(p, cx, cy, r, W, H)
+            return
+        shift_x = self._pointer.x() * r * 0.045
+        shift_y = self._pointer.y() * r * 0.035
+        size = r * 2.08
+        target = QRectF(cx - size / 2 + shift_x, cy - size / 2 + shift_y,
+                        size, size)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        source = QRectF(0, 0, self._core_reference.width(),
+                        self._core_reference.height())
+        p.drawPixmap(target, self._core_reference, source)
+
+        main, acc = self._core_colours()
+        live = self.speaking or self._amp_disp > 0.04
+        p.save()
+        # A restrained live sweep makes the otherwise photorealistic core
+        # respond to actual assistant state without turning into a fake meter.
+        sweep_r = r * 0.52
+        p.setPen(QPen(acc if live else main, 1.5 + self._amp_disp * 2.0))
+        p.drawArc(QRectF(cx - sweep_r, cy - sweep_r,
+                         sweep_r * 2, sweep_r * 2),
+                  int((self._core_phase * (24 if live else 9)) * 16), 34 * 16)
+
+        self._node_positions = []
+        for i, (orbit, speed, label) in enumerate(((0.58, 1.0, "VOICE"),
+                                                    (0.72, -0.72, "TOOLS"),
+                                                    (0.86, 0.48, "MEMORY"))):
+            a = self._core_phase * speed + i * 2.1
+            nx = cx + shift_x + math.cos(a) * r * orbit
+            ny = cy + shift_y + math.sin(a) * r * orbit * 0.40
+            self._node_positions.append((nx, ny, label))
+            nr = 3.0 + self._amp_disp * 3.0
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(acc if i == 1 else main)
+            p.drawEllipse(QRectF(nx - nr, ny - nr, nr * 2, nr * 2))
+            if self._hover_node == i:
+                p.setPen(QPen(QColor(225, 247, 255), 1.0))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawEllipse(QRectF(nx - nr - 6, ny - nr - 6,
+                                     (nr + 6) * 2, (nr + 6) * 2))
+                p.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
+                p.drawText(QRectF(nx + 12, ny - 14, 90, 28),
+                           Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                           label)
+        p.restore()
 
     def paintEvent(self, _):
         p = QPainter(self)
@@ -1053,7 +1199,11 @@ class HudCanvas(QWidget):
             _band_t = 12.0
             _band_h = max(60.0, _sy_status - 12.0 - _band_t)
             _r = min(W * 0.46, _band_h / 2.0)
-            self._paint_core(p, cx, _band_t + _band_h / 2.0, _r, W, _band_h)
+            if not self._core_reference.isNull():
+                self._paint_reference_core(p, cx, _band_t + _band_h / 2.0,
+                                           _r, W, _band_h)
+            else:
+                self._paint_core(p, cx, _band_t + _band_h / 2.0, _r, W, _band_h)
 
         # status text
         sy = _sy_status
