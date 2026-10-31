@@ -47,6 +47,6 @@ python3 -m py_compile \
 git diff --check
 ```
 
-The final core surface uses `Mark-LVI-main/Mark-LVI-main/assets/phantom_kinetic_core.png` for the reference-matched glass/metal finish, with live state, audio, parallax, hover, and orbit-node overlays drawn by `HudCanvas`. If that asset is unavailable, the procedural QPainter kinetic core remains the safe reduced-effects fallback. No new Python dependency or GPU runtime is required.
+The final command center follows the supplied PHANTOM concept across the whole shell: the icon navigation rail, monitor/current-task/quick-action cards, activity log, upcoming schedule, files/media cards, and floating listening dock are all built into `MainWindow` while preserving the existing callbacks. The core surface uses `Mark-LVI-main/Mark-LVI-main/assets/phantom_kinetic_core.png` for the reference-matched glass/metal finish, with live state, audio, parallax, hover, drag, and orbit-node overlays drawn by `HudCanvas`. Listening adds green orbital response, speaking adds an audio-reactive amber waveform/radial response, and hover changes parallax/focus lighting. If the asset is unavailable, the procedural QPainter kinetic core remains the safe reduced-effects fallback. No new Python dependency or GPU runtime is required.
 
 The visual specification and audit trail are stored in `design-refs/phantom-kinetic-core-desktop-default.png` and `design-refs/phantom-kinetic-core-breakdown.md`.
