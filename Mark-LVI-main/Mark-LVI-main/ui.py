@@ -36,18 +36,31 @@ from PyQt6.QtGui import (
     QFontDatabase, QKeySequence, QLinearGradient, QPainter, QPainterPath,
     QPen, QPixmap, QRadialGradient, QShortcut,
 )
-# Video playback for the HUD. Part of PyQt6, so it costs no new dependency —
-# but the multimedia plugins are a separate piece of the Qt install and can be
-# absent on a stripped-down system, so a failure here disables one feature
-# rather than stopping JARVIS from starting.
-try:
-    from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
-    from PyQt6.QtMultimediaWidgets import QGraphicsVideoItem
-    HAVE_VIDEO = True
-except Exception as _e:            # noqa: BLE001 - reported, never fatal
+# Video playback for the HUD. On Linux, constructing Qt audio objects without a
+# PulseAudio/PipeWire session can terminate the whole interpreter in native code;
+# detect that environment before importing/constructing the optional backend.
+_runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+_qt_audio_session = platform.system() != "Linux" or any(
+    p.exists() for p in (
+        _runtime / "pipewire-0",
+        _runtime / "pulse" / "native",
+        Path("/run/pipewire/pipewire-0"),
+    )
+)
+_video_disabled = os.environ.get("PHANTOM_DISABLE_VIDEO", "").lower() in {"1", "true", "yes"}
+if _qt_audio_session and not _video_disabled:
+    try:
+        from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
+        from PyQt6.QtMultimediaWidgets import QGraphicsVideoItem
+        HAVE_VIDEO = True
+    except Exception as _e:            # noqa: BLE001 - reported, never fatal
+        QAudioOutput = QMediaPlayer = QGraphicsVideoItem = None
+        HAVE_VIDEO = False
+        print(f"[Video] playback unavailable ({_e}) — the HUD will not show video.")
+else:
     QAudioOutput = QMediaPlayer = QGraphicsVideoItem = None
     HAVE_VIDEO = False
-    print(f"[Video] playback unavailable ({_e}) — the HUD will not show video.")
+    print("[Video] playback disabled — no desktop audio session is available.")
 
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -252,9 +265,13 @@ class _SysMetrics:
     def __init__(self):
         self.cpu  = 0.0
         self.mem  = 0.0
-        self.net  = 0.0   
-        self.gpu  = -1.0  
-        self.tmp  = -1.0  
+        self.net  = 0.0
+        self.net_up = 0.0
+        self.net_down = 0.0
+        self.gpu  = -1.0
+        self.tmp  = -1.0
+        self.battery = -1.0
+        self.battery_secs = -1
         self._lock = threading.Lock()
         self._last_net = psutil.net_io_counters()
         self._last_net_t = time.time()
@@ -290,9 +307,11 @@ class _SysMetrics:
         if dt > 0:
             sent = (nc.bytes_sent - self._last_net.bytes_sent) / dt
             recv = (nc.bytes_recv - self._last_net.bytes_recv) / dt
-            net  = (sent + recv) / (1024 * 1024)
+            net_up  = max(0.0, sent / (1024 * 1024))
+            net_down = max(0.0, recv / (1024 * 1024))
+            net  = net_up + net_down
         else:
-            net = 0.0
+            net = net_up = net_down = 0.0
         self._last_net   = nc
         self._last_net_t = now
 
@@ -307,12 +326,26 @@ class _SysMetrics:
             gpu = self.gpu
             tmp = self.tmp
 
+        battery = -1.0
+        battery_secs = -1
+        try:
+            bat = psutil.sensors_battery()
+            if bat is not None:
+                battery = float(bat.percent)
+                battery_secs = int(bat.secsleft) if bat.secsleft >= 0 else -1
+        except Exception:
+            pass
+
         with self._lock:
             self.cpu = cpu
             self.mem = mem
             self.net = net
+            self.net_up = net_up
+            self.net_down = net_down
             self.gpu = gpu
             self.tmp = tmp
+            self.battery = battery
+            self.battery_secs = battery_secs
 
     def _get_gpu(self) -> float:
         # pynvml — subprocess-free; initialise once and reuse the handle.
@@ -395,8 +428,12 @@ class _SysMetrics:
                 "cpu": self.cpu,
                 "mem": self.mem,
                 "net": self.net,
+                "net_up": self.net_up,
+                "net_down": self.net_down,
                 "gpu": self.gpu,
                 "tmp": self.tmp,
+                "battery": self.battery,
+                "battery_secs": self.battery_secs,
             }
 
 
@@ -1291,7 +1328,7 @@ class MetricBar(QWidget):
         self._color = color
         self._value = 0.0       # 0–100
         self._text  = "--"
-        self.setFixedHeight(38)
+        self.setFixedHeight(58)
         self.setMinimumWidth(80)
 
     def set_value(self, pct: float, text: str):
@@ -1309,20 +1346,6 @@ class MetricBar(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H = self.width(), self.height()
 
-        p.setBrush(QBrush(qcol(C.PANEL2)))
-        p.setPen(QPen(qcol(C.BORDER_A), 1))
-        p.drawRoundedRect(QRectF(1, 1, W - 2, H - 2), 4, 4)
-
-        bar_h   = 4
-        bar_y   = H - bar_h - 5
-        bar_w   = W - 12
-        bar_x   = 6
-        fill_w  = int(bar_w * self._value / 100)
-
-        p.setBrush(QBrush(qcol(C.BAR_BG)))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawRoundedRect(QRectF(bar_x, bar_y, bar_w, bar_h), 2, 2)
-
         if self._value > 85:
             bar_col = qcol(C.RED)
         elif self._value > 65:
@@ -1330,17 +1353,22 @@ class MetricBar(QWidget):
         else:
             bar_col = qcol(self._color)
 
-        if fill_w > 0:
-            p.setBrush(QBrush(bar_col))
-            p.drawRoundedRect(QRectF(bar_x, bar_y, fill_w, bar_h), 2, 2)
+        d = min(H - 8, 50)
+        x, y = 7, (H - d) / 2
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(qcol(C.BAR_BG), 3))
+        p.drawEllipse(QRectF(x, y, d, d))
+        p.setPen(QPen(bar_col, 3))
+        p.drawArc(QRectF(x, y, d, d), 90 * 16, -int(self._value * 3.6 * 16))
 
-        p.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        p.setFont(QFont("Segoe UI", 7, QFont.Weight.DemiBold))
         p.setPen(QPen(qcol(C.TEXT_DIM), 1))
-        p.drawText(QRectF(8, 5, 50, 14), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._label)
-
-        p.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        p.drawText(QRectF(x + d + 12, y + 4, W - x - d - 18, 16),
+                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._label)
+        p.setFont(QFont("Segoe UI", 12, QFont.Weight.DemiBold))
         p.setPen(QPen(bar_col if self._text != "--" else qcol(C.TEXT_DIM), 1))
-        p.drawText(QRectF(0, 4, W - 6, 16), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, self._text)
+        p.drawText(QRectF(x + d + 12, y + 18, W - x - d - 18, 24),
+                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._text)
 
         p.end()
 
@@ -1354,7 +1382,7 @@ class LogWidget(QTextEdit):
         # without bound — keeps memory flat and every insert cheap. Oldest
         # lines drop off the top automatically.
         self.document().setMaximumBlockCount(600)
-        self.setFont(QFont("Courier New", 9))
+        self.setFont(QFont("Segoe UI", 8))
         self.setStyleSheet(f"""
             QTextEdit {{
                 background: {C.PANEL};
@@ -1398,9 +1426,10 @@ class LogWidget(QTextEdit):
             self._typing = False
             return
         self._typing = True
-        self._text   = self._queue.pop(0)
+        raw_text = str(self._queue.pop(0)).strip()
+        self._text   = f"{time.strftime('%H:%M')}   {raw_text}"
         self._pos    = 0
-        tl = self._text.lower()
+        tl = raw_text.lower()
         _ai_pfx = f"{self._ai_name_lc}:"
         if   tl.startswith("you:"):                              self._tag = "you"
         elif tl.startswith(_ai_pfx) or tl.startswith("jarvis:"): self._tag = "ai"
@@ -5584,6 +5613,31 @@ class MainWindow(QMainWindow):
         except Exception:
             self._proc_lbl.setText("PROC  --")
 
+        tmp_text = f"{tmp:.0f}°C" if tmp >= 0 else "N/A"
+        up = snap.get("net_up", 0.0)
+        down = snap.get("net_down", 0.0)
+        battery = snap.get("battery", -1.0)
+        battery_text = f"{battery:.0f}%" if battery >= 0 else "N/A"
+        if hasattr(self, "_stat_details_lbl"):
+            self._stat_details_lbl.setText(
+                f"TEMP   {tmp_text}     NETWORK   ↓ {down:.1f} MB/s   ↑ {up:.1f} MB/s\n"
+                f"BATTERY   {battery_text}"
+            )
+        try:
+            interfaces = psutil.net_if_stats()
+            online = any(info.isup for name, info in interfaces.items()
+                         if not name.lower().startswith(("lo", "loopback")))
+        except Exception:
+            online = False
+        audio_label = "MUTED" if getattr(self, "_muted", False) else "READY"
+        if hasattr(self, "_header_status_lbl"):
+            self._header_status_lbl.setText(
+                f"⌁ {'ONLINE' if online else 'OFFLINE'}  ◖ {audio_label}  ▣ {battery_text}"
+            )
+            self._header_status_lbl.setStyleSheet(
+                f"color: {C.GREEN if online else C.TEXT_DIM}; background: transparent;"
+            )
+
 
     def _build_header(self) -> QWidget:
         w = QWidget()
@@ -5675,6 +5729,11 @@ class MainWindow(QMainWindow):
         lay.addStretch()
 
         right_col = QVBoxLayout(); right_col.setSpacing(2)
+        self._header_status_lbl = QLabel("⌁ NETWORK   ◖ AUDIO   ▣ BATTERY")
+        self._header_status_lbl.setFont(QFont("Segoe UI", 7))
+        self._header_status_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        self._header_status_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+        right_col.addWidget(self._header_status_lbl)
         self._clock_lbl = QLabel("00:00:00")
         self._clock_lbl.setFont(QFont("Segoe UI", 13, QFont.Weight.DemiBold))
         self._clock_lbl.setStyleSheet(f"color: {C.PRI}; background: transparent;")
@@ -5772,9 +5831,9 @@ class MainWindow(QMainWindow):
         self._bar_net = MetricBar("NETWORK", C.GREEN)
         self._bar_tmp = MetricBar("TEMP", "#c88492")
         for bar in (self._bar_cpu, self._bar_mem, self._bar_gpu): mv.addWidget(bar)
-        mini = QLabel("TEMP   45°C     NETWORK   ↓ 12.4 Mbps   ↑ 3.2 Mbps\nBATTERY   87%  ·  2h 34m")
-        mini.setFont(QFont("Courier New", 7)); mini.setStyleSheet(f"color: {C.TEXT_MED};")
-        mv.addWidget(mini)
+        self._stat_details_lbl = QLabel("TEMP   N/A     NETWORK   ↓ N/A   ↑ N/A\nBATTERY   N/A")
+        self._stat_details_lbl.setFont(QFont("Courier New", 7)); self._stat_details_lbl.setStyleSheet(f"color: {C.TEXT_MED};")
+        mv.addWidget(self._stat_details_lbl)
         cards.addWidget(monitor, 4)
 
         task, tv = _card("CURRENT TASK", C.ACC)
@@ -5785,9 +5844,10 @@ class MainWindow(QMainWindow):
         self._task_detail_lbl = QLabel("Awaiting your next command")
         self._task_detail_lbl.setFont(QFont("Segoe UI", 8)); self._task_detail_lbl.setStyleSheet(f"color: {C.TEXT_MED};")
         tv.addWidget(self._task_detail_lbl)
-        progress = QProgressBar(); progress.setRange(0, 100); progress.setValue(42); progress.setTextVisible(False); progress.setFixedHeight(6)
+        progress = QProgressBar(); progress.setRange(0, 100); progress.setValue(0); progress.setTextVisible(False); progress.setFixedHeight(6); progress.setVisible(False)
         progress.setStyleSheet(f"QProgressBar {{ background: {C.PANEL2}; border: none; border-radius: 3px; }} QProgressBar::chunk {{ background: {C.PRI}; border-radius: 3px; }}")
         tv.addWidget(progress)
+        self._task_progress = progress
         cards.addWidget(task, 3)
 
         quick, qv = _card("QUICK ACTIONS", C.PRI)
@@ -5836,8 +5896,9 @@ class MainWindow(QMainWindow):
         lay.addWidget(activity, 5)
 
         upcoming, uv = _card("UPCOMING", C.ACC)
-        events = QLabel("◷ 12:45        Meeting with team\n       Google Meet\n\n▣ 14:30        Study session\n       AP Human Geography\n\n◷ 17:00        Football practice\n       AISM Field")
-        events.setFont(QFont("Segoe UI", 8)); events.setStyleSheet(f"color: {C.TEXT_MED}; line-height: 150%;")
+        events = QLabel("No calendar connected\n\nConnect a calendar integration to show upcoming events here.")
+        events.setFont(QFont("Segoe UI", 8)); events.setStyleSheet(f"color: {C.TEXT_DIM};")
+        events.setWordWrap(True)
         uv.addWidget(events)
         lay.addWidget(upcoming, 3)
 
@@ -5850,11 +5911,6 @@ class MainWindow(QMainWindow):
         self._file_hint.setWordWrap(True); fv.addWidget(self._file_hint)
         lay.addWidget(files, 2)
 
-        media, mv = _card("MEDIA", "#ff4d65")
-        media_lbl = QLabel("YouTube\nNow playing\nChelsea vs Man United | Highlights")
-        media_lbl.setFont(QFont("Segoe UI", 8)); media_lbl.setStyleSheet(f"color: {C.TEXT_MED};")
-        mv.addWidget(media_lbl)
-        lay.addWidget(media, 2)
         return w
 
     def _build_quick_drawer(self) -> QWidget:
